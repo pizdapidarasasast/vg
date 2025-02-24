@@ -1,0 +1,264 @@
+-- Configuration Table (SilentAimSettings)
+local SilentAimSettings = {
+    Enabled = false,
+    TeamCheck = false,
+    TargetPart = "HumanoidRootPart",
+    FOVRadius = 130,
+    HitChance = 100,
+    -- Removed: ClassName, SilentAimMethod (not directly relevant), FOVVisible, ShowSilentAimTarget
+    -- We'll handle the visuals with the UI buttons instead.
+}
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService") -- Now actively used for the GUI.
+
+-- Local Player and Camera
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Utility Functions
+local GetPlayers = Players.GetPlayers
+local WorldToScreen = Camera.WorldToScreenPoint
+local GetPartsObscuringTarget = Camera.GetPartsObscuringTarget
+local FindFirstChild = game.FindFirstChild -- or workspace.FindFirstChild, game:GetService("StarterGui").FindFirstChild, etc.  Be specific!
+
+-- Constants
+local ValidTargetParts = { "Head", "HumanoidRootPart" }
+local PlayerModelName = "Runner"  -- Use the correct model name.
+
+-- UI Elements (Toggle Buttons)
+local ToggleButtons = {}
+
+local function createToggleButton(name, text, toggledFunc)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Text = text .. ": Off"
+    button.Size = UDim2.new(0, 150, 0, 30) -- Adjust size as needed
+    button.Position = UDim2.new(1, -160, 0, (table.getn(ToggleButtons) * 40) + 10)  -- Position on the top-right, stacked.
+    button.AnchorPoint = Vector2.new(1, 0)
+    button.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.Font = Enum.Font.SourceSansBold
+    button.Parent = GuiService:GetGuiInset()  -- GetGuiInset gives the ScreenGui. Use :GetChildren() to find and use an existing one, if necessary
+
+    local toggled = false
+    button.MouseButton1Click:Connect(function()
+        toggled = not toggled
+        button.Text = text .. ": " .. (toggled and "On" or "Off")
+        button.BackgroundColor3 = toggled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(50, 50, 50)
+        toggledFunc(toggled) -- Call the provided function to handle the toggle.
+    end)
+
+    table.insert(ToggleButtons, button)
+    return button
+end
+
+-- Create Toggle Buttons for Each Feature
+createToggleButton("SilentAimToggle", "Silent Aim", function(state)
+    SilentAimSettings.Enabled = state
+end)
+
+createToggleButton("TeamCheckToggle", "Team Check", function(state)
+    SilentAimSettings.TeamCheck = state
+end)
+
+-- Hit Chance Function (Corrected)
+local function CalculateChance(Percentage)
+    return math.random() <= (Percentage / 100)
+end
+
+-- Visibility Check (Simplified)
+local function IsPlayerVisible(Player)
+    local PlayerCharacter = Player.Character
+    local LocalPlayerCharacter = LocalPlayer.Character
+    if not (PlayerCharacter and LocalPlayerCharacter) then return false end
+
+    local PlayerRoot = PlayerCharacter:FindFirstChild(SilentAimSettings.TargetPart)
+    if not PlayerRoot then return false end
+
+    local CastPoints = { PlayerRoot.Position }
+    local IgnoreList = { LocalPlayerCharacter, PlayerCharacter }
+    local ObscuringObjects = #GetPartsObscuringTarget(Camera, CastPoints, IgnoreList)
+    return ObscuringObjects == 0
+end
+
+-- Find the Closest Player (Modified for "Runner" model and FOV)
+local function getClosestPlayer()
+    if not SilentAimSettings.Enabled then return nil end  -- Only run if enabled.
+
+    local ClosestPlayer = nil
+    local ShortestDistance = math.huge
+    local ScreenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, Player in ipairs(GetPlayers()) do
+        if Player == LocalPlayer then continue end
+        if SilentAimSettings.TeamCheck and Player.Team == LocalPlayer.Team then continue end
+
+        local Character = Player.Character
+        if not Character then continue end
+        --Check if Runner Model exist
+        if not Character:FindFirstChild(PlayerModelName) then continue end
+
+        local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+        local TargetPart = Character:FindFirstChild(PlayerModelName):FindFirstChild(SilentAimSettings.TargetPart)
+
+        if not (Humanoid and TargetPart and Humanoid.Health > 0) then continue end
+
+
+        local ScreenPosition, OnScreen = WorldToScreen(Camera, TargetPart.Position)
+        if not OnScreen then continue end
+
+        local Distance = (ScreenCenter - ScreenPosition).Magnitude
+        if Distance <= SilentAimSettings.FOVRadius and Distance < ShortestDistance then
+            ClosestPlayer = TargetPart  -- Return the *part* itself, not the player.  Important for later calculations.
+            ShortestDistance = Distance
+        end
+    end
+
+    return ClosestPlayer
+end
+
+
+--[[  *** CORE SILENT AIM LOGIC (Placeholder - Needs Adaptation) ***
+
+    This section MUST be adapted to the specific game you are working with.
+    You need to find the function or event that handles projectile firing
+    and hook it.  The example below assumes a function called "FireProjectile"
+    exists and takes a direction as an argument.  THIS WILL NOT WORK
+    without modification to match your target game.
+
+--]]
+
+local originalFireProjectile -- Placeholder
+
+--Example:
+-- originalFireProjectile = hookfunction(game.ReplicatedStorage.Remotes.Weapon.Shoot.FireServer, function(self, ...) --Hook the remote event
+--     local args = {...}
+-- 	local TargetPart = getClosestPlayer()
+
+-- 	if SilentAimSettings.Enabled and TargetPart then
+-- 		if CalculateChance(SilentAimSettings.HitChance) then
+-- 			local Origin = LocalPlayer.Character.HumanoidRootPart.Position
+-- 			local Direction = (TargetPart.Position - Origin).Unit
+--             args[1] = Direction -- Modify the correct argument, in this case its probably a direction
+-- 		end
+-- 	end
+	
+--     return originalFireProjectile(self, unpack(args)) --Call original function with modified args
+-- end)
+
+-- Keybinds (Alternative to UI buttons - optional)
+--[[
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    if gameProcessedEvent then return end
+
+    if input.KeyCode == Enum.KeyCode.U then -- Example: Toggle with 'U'
+        SilentAimSettings.Enabled = not SilentAimSettings.Enabled
+        print("Silent Aim Toggled:", SilentAimSettings.Enabled)
+        -- Update UI button state if using both keybinds and buttons.
+    end
+-- ... (Previous code from the last response) ...
+
+-- Keybinds (Alternative to UI buttons - optional) - COMPLETED VERSION
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    if gameProcessedEvent then return end
+
+    if input.KeyCode == Enum.KeyCode.U then -- Example: Toggle Silent Aim with 'U'
+        SilentAimSettings.Enabled = not SilentAimSettings.Enabled
+        print("Silent Aim Toggled:", SilentAimSettings.Enabled)
+
+        -- Update the corresponding UI button's state:
+        local button = ToggleButtons["SilentAimToggle"]
+        if button then
+            button.Text = "Silent Aim: " .. (SilentAimSettings.Enabled and "On" or "Off")
+            button.BackgroundColor3 = SilentAimSettings.Enabled and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(50, 50, 50)
+        end
+    end
+	
+	if input.KeyCode == Enum.KeyCode.T then -- Example: Toggle team check with 'T'
+        SilentAimSettings.TeamCheck = not SilentAimSettings.TeamCheck
+        print("Team Check Toggled:", SilentAimSettings.TeamCheck)
+
+        -- Update the corresponding UI button's state:
+        local button = ToggleButtons["TeamCheckToggle"]
+        if button then
+            button.Text = "Team Check: " .. (SilentAimSettings.TeamCheck and "On" or "Off")
+            button.BackgroundColor3 = SilentAimSettings.TeamCheck and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(50, 50, 50)
+        end
+    end
+end)
+
+
+--[[  *** CORE SILENT AIM LOGIC (Placeholder - Needs Adaptation) ***
+
+    This section MUST be adapted to the specific game you are working with.
+    You need to find the function or event that handles projectile firing
+    and hook it.  The example below assumes a RemoteEvent called "Shoot"
+    exists under game.ReplicatedStorage.Remotes.Weapon.  THIS WILL NOT WORK
+    without modification to match your target game. This example hooks a
+	RemoteEvent, the most probable method.
+
+--]]
+
+local originalFireServer -- Placeholder for the original FireServer function.
+
+-- VERY IMPORTANT:  Inspect the game's code using your exploit's tools
+-- to find the *exact* path to the RemoteEvent (or function) that handles
+-- shooting.  The path below is a COMMON example, but might not be correct
+-- for your specific game.
+
+-- Assuming the RemoteEvent is at: game.ReplicatedStorage.Remotes.Weapon.Shoot
+
+if game.ReplicatedStorage and game.ReplicatedStorage:FindFirstChild("Remotes") and game.ReplicatedStorage.Remotes:FindFirstChild("Weapon") and game.ReplicatedStorage.Remotes.Weapon:FindFirstChild("Shoot") then
+
+	local ShootEvent = game.ReplicatedStorage.Remotes.Weapon.Shoot
+
+	-- Hook the FireServer event of the RemoteEvent.
+	originalFireServer = hookfunction(ShootEvent.FireServer, function(self, ...)
+		local args = {...} -- Capture all arguments passed to FireServer.
+
+		-- Check if silent aim is enabled and if we have a valid target.
+		local TargetPart = getClosestPlayer()
+
+		if SilentAimSettings.Enabled and TargetPart then
+			-- Apply hit chance.
+			if CalculateChance(SilentAimSettings.HitChance) then
+				-- Calculate the correct direction.  IMPORTANT:  You might need
+				-- to adjust the origin point (where the bullet comes from)
+				-- based on the specific game.  It could be the weapon, the
+				-- character's head, etc.
+				local Origin = LocalPlayer.Character.HumanoidRootPart.Position -- Example origin.
+				local Direction = (TargetPart.Position - Origin).Unit
+
+				-- Modify the arguments.  This is the MOST game-specific part.
+				-- You need to figure out WHICH argument in the `args` table
+				-- represents the projectile's direction (or CFrame, or whatever
+				-- the game uses).  It might be the first argument (args[1]),
+				-- or a later one.  It might be a Vector3, or it might be part
+				-- of a table within the arguments.  Use your exploit's debugger
+				-- to inspect the arguments being passed to FireServer.
+
+				-- ASSUMPTION:  The first argument (args[1]) is the direction.
+				-- This is a common case, BUT MIGHT BE WRONG.
+                -- If the first argument is the target, use args[2] for the direction.
+				if type(args[1]) == "Vector3" then
+                    args[1] = Direction
+                elseif type(args[1] == "CFrame") then
+                    args[1] = CFrame.new(Origin, TargetPart.Position)
+                end
+
+
+			end
+		end
+
+		-- Call the original FireServer function with the (potentially modified) arguments.
+		return originalFireServer(self, unpack(args))
+	end)
+
+else
+	warn("Shoot RemoteEvent not found.  Silent aim will not work.")
+	-- Consider adding a UI element to display this error message.
+end
